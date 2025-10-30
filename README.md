@@ -1,5 +1,6 @@
 # gemini_auto_cleanup
 
+ご利用は**自己責任**でお願いします
 ### セットアップ
 
 ##### gemini cliのインストール
