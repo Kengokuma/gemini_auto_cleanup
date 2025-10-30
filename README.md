@@ -17,7 +17,7 @@
    ```bash
    cd gemini_auto_cleanup
    chmod +x demo_setup.sh
-   bash demo_setup.sh
+   ./demo_setup.sh
    ```
 
 ### コンパイル
@@ -34,5 +34,5 @@
 
    ```bash
    chmod +x demo_clean.sh
-   bash demo_clean.sh
+   ./demo_clean.sh
    ```
