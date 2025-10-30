@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- 設定 ---
-PROTECTED_FILES="gemini_auto_cleanup.c demo_clean.sh demo_setup.sh"
+PROTECTED_FILES="gemini_auto_cleanup.c demo_clean.sh demo_setup.sh .git README.md"
 PROTECTED_EXEC="a.out" 
 
 # --- Cleanup Execution ---

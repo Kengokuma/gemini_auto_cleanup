@@ -6,14 +6,15 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <dirent.h>
 
 #define MAX_PATH 1024
 #define MAX_OUTPUT_SIZE 16384
 #define TEMP_OUTPUT_FILE "/tmp/gemini_output.txt"
 
-char* execute_command(const char* command) {
-    FILE *fp;
-    char buffer[1024];
+char* get_directory_contents(const char* path) {
+    DIR *dir;
+    struct dirent *entry;
     char *output = (char*)malloc(MAX_OUTPUT_SIZE);
     if (output == NULL) {
         perror("malloc");
@@ -21,26 +22,39 @@ char* execute_command(const char* command) {
     }
     output[0] = '\0';
 
-    fp = popen(command, "r");
-    if (fp == NULL) {
-        perror("popen failed");
+    dir = opendir(path);
+    if (dir == NULL) {
+        perror("opendir failed");
         free(output);
         return NULL;
     }
 
-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-        if (strlen(output) + strlen(buffer) + 1 > MAX_OUTPUT_SIZE) {
-            fprintf(stderr, "Error: Output buffer overflowed.\n");
-            pclose(fp);
-            free(output);
-            return NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
         }
-        strcat(output, buffer);
+
+        char suffix = '\0';
+        if (entry->d_type == DT_DIR) {
+            suffix = '/';
+        }
+        
+        size_t name_len = strlen(entry->d_name);
+        if (strlen(output) + name_len + 3 > MAX_OUTPUT_SIZE) {
+            fprintf(stderr, "Error: Directory content buffer overflowed.\n");
+            break;
+        }
+
+        strcat(output, entry->d_name);
+        if (suffix != '\0') {
+            size_t current_len = strlen(output);
+            output[current_len] = suffix;
+            output[current_len + 1] = '\0';
+        }
+        strcat(output, "  ");
     }
 
-    if (pclose(fp) == -1) {
-        perror("pclose failed");
-    }
+    closedir(dir);
     
     return output;
 }
@@ -58,8 +72,8 @@ int main() {
     
     printf("Current directory: %s\n", current_dir);
 
-    printf("Fetching directory contents...\n");
-    dir_contents = execute_command("ls -F"); 
+    printf("Fetching directory contents using readdir()...\n");
+    dir_contents = get_directory_contents(current_dir); 
     
     if (dir_contents == NULL) {
         fprintf(stderr, "Failed to get directory contents.\n");
@@ -67,7 +81,7 @@ int main() {
     }
 
     snprintf(gemini_prompt, sizeof(gemini_prompt), 
-             "あなたはディレクトリ '%s' にいます。内容は:\n---\n%s---\nこの内容に基づき、まず実行すべき整理とクリーンアップのコマンドリストを以下の形式で出力してください。gemini_auto_cleanup.cとその実行ファイル、demo_setup.bash、demo_clean.shは移動させないでください。**コマンドリストの出力後**に、整理の全体像やその他の提案を自由形式で記述してください。\n\nコマンド形式:\n'MKDIR: [新しいディレクトリ名]'\n'MOVE: [移動元ファイル/ディレクトリ名] [移動先ディレクトリ名]'\n'DELETE: [ファイル名/空ディレクトリ名]'\n\n",
+             "あなたはディレクトリ '%s' にいます。内容は:\n---\n%s---\nこの内容に基づき、まず実行すべき整理とクリーンアップのコマンドリストを以下の形式で出力してください。gemini_auto_cleanup.cとその実行ファイル、demo_setup.bash、demo_clean.sh、README.md, .gitディレクトリは移動させたり削除したりしないでください。**コマンドリストの出力後**に、整理の全体像やその他の提案を自由形式で記述してください。\n\nコマンド形式:\n'MKDIR: [新しいディレクトリ名]'\n'MOVE: [移動元ファイル/ディレクトリ名] [移動先ディレクトリ名]'\n'DELETE: [ファイル名/空ディレクトリ名]'\n\n",
              current_dir, dir_contents);
              
     snprintf(gemini_command, sizeof(gemini_command), 
@@ -98,13 +112,11 @@ int main() {
     }
 
     char line[MAX_PATH * 2];
-    int in_proposal_section = 0; // 提案セクションに入ったかどうかのフラグ
+    int in_proposal_section = 0;
     
     while (fgets(line, sizeof(line), cmd_file) != NULL) {
-        // 改行文字を削除
         line[strcspn(line, "\n")] = 0; 
         
-        // コマンドの先頭チェック
         if (strncmp(line, "MKDIR:", 6) == 0 || 
             strncmp(line, "MOVE:", 5) == 0 || 
             strncmp(line, "DELETE:", 7) == 0) {
@@ -112,14 +124,12 @@ int main() {
             if (!in_proposal_section) {
                 printf("\n--- Executing Commands ---\n");
             }
-            in_proposal_section = 0; // コマンドが見つかったらコマンド処理に戻す
+            in_proposal_section = 0;
 
-            // 元の行を操作しないようコピーを作成
             char temp_line[MAX_PATH * 2];
             strncpy(temp_line, line, sizeof(temp_line) - 1);
             temp_line[sizeof(temp_line) - 1] = '\0';
             
-            // コマンド解析
             char *token = strtok(temp_line, ": "); 
             char *command_type = token;
             
@@ -128,7 +138,6 @@ int main() {
             char *arg1 = strtok(NULL, " "); 
             char *arg2 = (arg1 != NULL) ? strtok(NULL, " ") : NULL; 
             
-            // コマンドタイプに基づいた処理の実行
             if (strcmp(command_type, "MKDIR") == 0 && arg1 != NULL) {
                 printf("Attempting MKDIR: %s\n", arg1);
                 if (mkdir(arg1, 0755) == -1) {
@@ -180,7 +189,6 @@ int main() {
                 fprintf(stderr, "Unrecognized command format: %s\n", line);
             }
         } else {
-            // コマンド形式ではない行は提案文として扱う
             if (!in_proposal_section) {
                 printf("\n--- Gemini's Proposals/Summary ---\n");
                 in_proposal_section = 1;
